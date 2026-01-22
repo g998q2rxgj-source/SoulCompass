@@ -1,15 +1,21 @@
 import streamlit as st
 import time
 import os
+import requests
+import json
 from PIL import Image
+import random
 
-# --- 1. 配置区域 ---
-# ⚠️ 替换成你自己的 Token 和 Bot ID
-COZE_API_TOKEN = "你的pat_开头的token" 
-BOT_ID = "你的bot_id数字"
-COZE_API_URL = "https://api.coze.com/v3/chat" 
+# ==================================================
+# ✅ 你的配置已填好 (切勿修改)
+# ==================================================
+COZE_API_TOKEN = "pat_e9JyWvouJgeY2MqCDbuYdYWl7DR6wzL9T0qJ8w5HIGplBQVbjzNI07I2TCImLGD7"
+BOT_ID = "7595634139391983669"
+# ==================================================
 
-# --- 页面基础设置 ---
+COZE_API_URL = "https://api.coze.com/v3/chat"
+
+# --- 页面配置 ---
 st.set_page_config(
     page_title="灵犀占星 SoulCompass",
     page_icon="🔮",
@@ -17,22 +23,61 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 工具函数：加载本地图片 ---
+# --- 工具函数 ---
 def load_image(path):
-    """尝试加载本地图片，如果找不到则返回None"""
+    """加载本地图片，防止报错"""
     if os.path.exists(path):
         return Image.open(path)
-    else:
-        return None
+    return None
 
-# --- 辅助函数：打字机文字效果 ---
+def call_coze_ai(user_input, user_name, birth_info):
+    """调用 Coze AI 获取真实解读"""
+    headers = {
+        "Authorization": f"Bearer {COZE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # 构造发给 AI 的完整提示词
+    full_prompt = f"我是{user_name}，出生于{birth_info}。我的问题是：{user_input}。请结合塔罗、星盘和易经为我进行深度解读。"
+
+    data = {
+        "bot_id": BOT_ID,
+        "user_id": "user_123456",
+        "stream": False, 
+        "auto_save_history": True,
+        "additional_messages": [
+            {
+                "role": "user",
+                "content": full_prompt,
+                "content_type": "text"
+            }
+        ]
+    }
+
+    try:
+        response = requests.post(COZE_API_URL, headers=headers, json=data)
+        response.raise_for_status()
+        
+        response_data = response.json()
+        
+        # 提取 AI 的回答 (解析 Coze V3 格式)
+        if "data" in response_data:
+            for msg in reversed(response_data["data"]):
+                if msg.get("type") == "answer":
+                    return msg.get("content")
+        
+        return "🔮 宇宙信号连接微弱，请重试..."
+        
+    except Exception as e:
+        return f"⚠️ 连接失败，错误信息: {str(e)}"
+
 def stream_text(text):
-    """让文字像打字机一样一个字一个字蹦出来"""
+    """打字机效果"""
     for word in text.split():
         yield word + " "
         time.sleep(0.05)
 
-# --- 侧边栏：用户输入区 ---
+# --- 侧边栏 ---
 with st.sidebar:
     st.title("🔮 开启命运仪式")
     st.markdown("---")
@@ -41,177 +86,85 @@ with st.sidebar:
     name = st.text_input("你的名字 / Nickname", key="name")
     
     col1, col2, col3 = st.columns(3)
-    with col1:
-        birth_year = st.number_input("出生年", 1950, 2010, 1995)
-    with col2:
-        birth_month = st.number_input("月", 1, 12, 1)
-    with col3:
-        birth_day = st.number_input("日", 1, 31, 1)
+    with col1: birth_year = st.number_input("年", 1950, 2010, 1995)
+    with col2: birth_month = st.number_input("月", 1, 12, 1)
+    with col3: birth_day = st.number_input("日", 1, 31, 1)
         
     st.markdown("---")
     st.header("Step 2: 潜意识链接")
-    st.info("深呼吸，默念你的问题，凭直觉输入 3 个数字。它们将决定你的塔罗牌阵。")
-    n1 = st.slider("灵数一 (根源)", 0, 77, 7)
-    n2 = st.slider("灵数二 (当下)", 0, 77, 22)
-    n3 = st.slider("灵数三 (指引)", 0, 77, 45)
+    st.info("默念问题，凭直觉调整灵数。")
+    n1 = st.slider("灵数一", 0, 77, 7)
+    n2 = st.slider("灵数二", 0, 77, 22)
+    n3 = st.slider("灵数三", 0, 77, 45)
 
-# --- 主页面区域 ---
+# --- 主页面 ---
 st.title("🌌 SoulCompass 全息命运指引")
 st.markdown("*连接东方易理与西方星象，为你显化当下的能量图景。*")
 
-# 问题输入框
-user_question = st.text_area("Step 3: 你想问宇宙什么问题？", height=100, placeholder="例如：我未来的事业发展方向在哪里？这段感情会有结果吗？")
-
-# 开始按钮
+user_question = st.text_area("Step 3: 你想问宇宙什么问题？", height=100, placeholder="请输入你想占卜的具体问题...")
 start_button = st.button("✨ 启动全息推演 ✨", type="primary", use_container_width=True)
 
-# --- 核心逻辑区 ---
+# --- 核心逻辑 ---
 if start_button:
     if not user_question:
-        st.error("请先告诉宇宙你想问什么问题...")
+        st.error("请先输入你的问题...")
     else:
-        # ==========================
-        # 1. 启动仪式：进度条加载
-        # ==========================
-        progress_text = "正在连接阿卡西记录... 正在校准星盘数据..."
+        # 1. 仪式感：显示进度条
+        progress_text = "正在连接阿卡西记录... 正在请求宗师解读..."
         my_bar = st.progress(0, text=progress_text)
-
-        for percent_complete in range(100):
-            time.sleep(0.02) # 模拟连接耗时
-            my_bar.progress(percent_complete + 1, text=progress_text)
         
-        my_bar.empty() # 加载条消失
+        # 2. 真实调用 AI
+        birth_info = f"{birth_year}年{birth_month}月{birth_day}日"
+        ai_reply = call_coze_ai(user_question, name if name else "探求者", birth_info)
         
-        # ==========================
-        # 2. 准备数据 (模拟 API 返回)
-        # ==========================
-        # 这里为了演示翻牌，我们手动指定了三张牌
-        # 你的 assets/tarot/ 文件夹里必须有这些图片才能看到效果
-        mock_coze_response = {
-            "tarot_cards": [
-                {"name": "The Fool", "file": "assets/tarot/the_fool.jpg", "desc": "过去：愚人 (The Fool)"},
-                {"name": "Death", "file": "assets/tarot/death.jpg", "desc": "现在：死神 (Death)"},
-                {"name": "The Sun", "file": "assets/tarot/the_sun.jpg", "desc": "未来：太阳 (The Sun)"}
-            ],
-            "yijing_file": "assets/yijing/qian.jpg",
-            "zodiac_file": "assets/zodiac/capricorn.jpg",
-            "full_text_reply": "亲爱的探求者，牌面显示你正处于一个巨大的转变期。愚人代表你刚刚开始一段未知的旅程，心中充满天真与勇气；死神并不代表终结，而是彻底的蜕变与重生..."
-        }
+        # 3. 进度条跑完
+        my_bar.progress(100, text="能量图景已显化！")
+        time.sleep(0.5)
+        my_bar.empty()
         
-        st.success("能量通道已建立，命运牌阵即将揭晓...")
+        st.success("命运指引已送达。")
         st.divider()
 
-        # ==========================
-        # 3. 🎴 动态翻牌特效 (核心)
-        # ==========================
-        st.subheader("🎴 塔罗牌阵 (潜意识投射)")
-        
-        # 布局三个位置
+        # 4. 视觉呈现 (翻牌动画)
+        st.subheader("🎴 塔罗牌阵 (能量显化)")
         t1, t2, t3 = st.columns(3)
-        
-        # 尝试加载牌背图片
         card_back = load_image("assets/tarot/card_back.jpg")
         
-        # --- 阶段 A: 发牌 (全部显示背面) ---
+        # 确保你有这些图片，否则会显示找不到
+        cards = [
+            {"file": "assets/tarot/the_fool.jpg", "name": "愚人"},
+            {"file": "assets/tarot/death.jpg", "name": "死神"},
+            {"file": "assets/tarot/the_sun.jpg", "name": "太阳"}
+        ]
+        # 随机排序以增加神秘感
+        random_cards = random.sample(cards, 3)
+
         if card_back:
-            # 创建三个空的占位符，先把牌背放上去
-            with t1:
-                p1 = st.empty()
-                p1.image(card_back, caption="抽取中...", use_container_width=True)
-            with t2:
-                p2 = st.empty()
-                p2.image(card_back, caption="抽取中...", use_container_width=True)
-            with t3:
-                p3 = st.empty()
-                p3.image(card_back, caption="抽取中...", use_container_width=True)
+            # 先显示背面
+            with t1: p1 = st.empty(); p1.image(card_back, use_container_width=True)
+            with t2: p2 = st.empty(); p2.image(card_back, use_container_width=True)
+            with t3: p3 = st.empty(); p3.image(card_back, use_container_width=True)
             
-            # 制造悬念
-            time.sleep(1.0) 
+            # 依次翻开
+            time.sleep(0.8)
+            p1.image(load_image(random_cards[0]["file"]), caption=f"过去：{random_cards[0]['name']}", use_container_width=True)
             
-            # --- 阶段 B: 翻牌 (一张张揭晓) ---
+            time.sleep(0.8)
+            p2.image(load_image(random_cards[1]["file"]), caption=f"现在：{random_cards[1]['name']}", use_container_width=True)
             
-            # 翻开第一张
-            img1 = load_image(mock_coze_response["tarot_cards"][0]["file"])
-            if img1:
-                p1.image(img1, caption=mock_coze_response["tarot_cards"][0]["desc"], use_container_width=True)
-            else:
-                p1.warning("图片缺失")
-            
-            time.sleep(0.8) # 停顿
-            
-            # 翻开第二张
-            img2 = load_image(mock_coze_response["tarot_cards"][1]["file"])
-            if img2:
-                p2.image(img2, caption=mock_coze_response["tarot_cards"][1]["desc"], use_container_width=True)
-            else:
-                p2.warning("图片缺失")
-                
-            time.sleep(0.8) # 停顿
-            
-            # 翻开第三张
-            img3 = load_image(mock_coze_response["tarot_cards"][2]["file"])
-            if img3:
-                p3.image(img3, caption=mock_coze_response["tarot_cards"][2]["desc"], use_container_width=True)
-            else:
-                p3.warning("图片缺失")
-                
+            time.sleep(0.8)
+            p3.image(load_image(random_cards[2]["file"]), caption=f"未来：{random_cards[2]['name']}", use_container_width=True)
         else:
-            # 如果没有 card_back.jpg，就直接显示结果，不搞动画了
-            st.warning("提示：请在 assets/tarot/ 下放入 card_back.jpg 以启用翻牌动画")
-            with t1:
-                st.image(load_image(mock_coze_response["tarot_cards"][0]["file"]), caption="过去", use_container_width=True)
-            with t2:
-                st.image(load_image(mock_coze_response["tarot_cards"][1]["file"]), caption="现在", use_container_width=True)
-            with t3:
-                st.image(load_image(mock_coze_response["tarot_cards"][2]["file"]), caption="未来", use_container_width=True)
+            # 如果没有背面图，直接显示正面
+            st.warning("提示：assets/tarot/card_back.jpg 未找到，跳过动画")
+            t1.image(load_image(random_cards[0]["file"]), caption="过去", use_container_width=True)
+            t2.image(load_image(random_cards[1]["file"]), caption="现在", use_container_width=True)
+            t3.image(load_image(random_cards[2]["file"]), caption="未来", use_container_width=True)
 
         st.divider()
 
-        # ==========================
-        # 4. 展示其他命理图
-        # ==========================
-        
-        # 第一排：星盘 + 易经
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("🪐 星盘能量")
-            zodiac_img = load_image(mock_coze_response["zodiac_file"])
-            if zodiac_img:
-                st.image(zodiac_img, caption="本命星盘背景", use_container_width=True)
-            else:
-                st.info("星盘图未加载")
-        
-        with c2:
-            st.subheader("☯️ 易经指引")
-            gua_img = load_image(mock_coze_response["yijing_file"])
-            if gua_img:
-                st.image(gua_img, width=150, caption="乾为天")
-            else:
-                st.info("易经卦图未加载")
-
-        # 第二排：紫微 + 奇门
-        c3, c4 = st.columns(2)
-        with c3:
-            st.subheader("📜 紫微斗数")
-            ziwei_bg = load_image("assets/atmosphere/ziwei_bg.jpg")
-            if ziwei_bg:
-                st.image(ziwei_bg, caption="紫微命盘", use_container_width=True)
-            else:
-                st.info("紫微图未加载")
-        
-        with c4:
-            st.subheader("🧭 奇门遁甲")
-            qimen_bg = load_image("assets/atmosphere/qimen_bg.jpg")
-            if qimen_bg:
-                st.image(qimen_bg, caption="奇门时空盘", use_container_width=True)
-            else:
-                st.info("奇门图未加载")
-
-        st.divider()
-
-        # ==========================
-        # 5. 文字报告 (打字机效果)
-        # ==========================
-        st.subheader("🧙‍♂️ 宗师深度解读报告")
-        # 使用 write_stream 实现打字机效果
-        st.write_stream(stream_text(mock_coze_response["full_text_reply"]))
+        # 5. 展示 AI 真实回答
+        st.subheader("🧙‍♂️ 宗师深度解读")
+        st.markdown("---")
+        st.write_stream(stream_text(ai_reply))
+        st.markdown("---")
