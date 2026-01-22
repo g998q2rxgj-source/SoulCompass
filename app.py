@@ -7,7 +7,7 @@ from PIL import Image
 import random
 
 # ==================================================
-# ✅ 你的配置已自动填好 (切勿修改)
+# ✅ 你的配置已填好 (切勿修改)
 # ==================================================
 COZE_API_TOKEN = "pat_e9JyWvouJgeY2MqCDbuYdYWl7DR6wzL9T0qJ8w5HIGplBQVbjzNI07I2TCImLGD7"
 BOT_ID = "7595634139391983669"
@@ -29,21 +29,24 @@ def load_image(path):
 
 def call_coze_stream(user_input, user_name, birth_info):
     """
-    使用流式 (Stream) 请求
-    ✅ 彻底修复 'str object has no attribute get' 报错
-    ✅ 实现真正的打字机效果
+    V5.0: 发送更完整的信息（含性别、时辰），防止 AI 追问
     """
     headers = {
         "Authorization": f"Bearer {COZE_API_TOKEN}",
         "Content-Type": "application/json"
     }
     
-    full_prompt = f"我是{user_name}，出生于{birth_info}。我的问题是：{user_input}。请结合塔罗、星盘和易经为我进行深度解读。"
+    # 构造发给 AI 的完整提示词，明确要求不再追问
+    full_prompt = (
+        f"我是{user_name}，{birth_info}。我的问题是：{user_input}。"
+        f"请直接开始排盘并结合塔罗、星盘和易经进行深度解读。"
+        f"（注意：不需要再问我要更多信息，直接基于现有信息进行推演）"
+    )
 
     data = {
         "bot_id": BOT_ID,
         "user_id": "user_123456",
-        "stream": True,  # <--- 开启流式传输，修复的关键！
+        "stream": True, 
         "auto_save_history": True,
         "additional_messages": [
             {
@@ -55,19 +58,16 @@ def call_coze_stream(user_input, user_name, birth_info):
     }
 
     try:
-        # 开启 stream=True 后，我们需要用 iter_lines 来逐行读取
         response = requests.post(COZE_API_URL, headers=headers, json=data, stream=True)
         response.raise_for_status()
         
-        # 这是一个生成器，它会一点点把文字“吐”出来给界面
         for line in response.iter_lines():
             if line:
                 decoded_line = line.decode('utf-8')
                 if decoded_line.startswith("data:"):
-                    json_str = decoded_line[5:] # 去掉开头的 "data:"
+                    json_str = decoded_line[5:]
                     try:
                         event_data = json.loads(json_str)
-                        # 只有当类型是 answer 时，才是我们要的回复内容
                         if event_data.get("type") == "answer" and "content" in event_data:
                             yield event_data["content"]
                     except:
@@ -75,7 +75,7 @@ def call_coze_stream(user_input, user_name, birth_info):
     except Exception as e:
         yield f"⚠️ 连接中断: {str(e)}"
 
-# --- 侧边栏 ---
+# --- 侧边栏：用户输入区 (已升级) ---
 with st.sidebar:
     st.title("🔮 开启命运仪式")
     st.markdown("---")
@@ -83,10 +83,25 @@ with st.sidebar:
     st.header("Step 1: 你的信息")
     name = st.text_input("你的名字 / Nickname", key="name")
     
+    # === V5.0 新增：性别选择 ===
+    gender = st.radio("性别 (排盘必要)", ["男", "女"], horizontal=True)
+    
     col1, col2, col3 = st.columns(3)
-    with col1: birth_year = st.number_input("年", 1950, 2010, 1995)
+    with col1: birth_year = st.number_input("出生年", 1950, 2010, 1995)
     with col2: birth_month = st.number_input("月", 1, 12, 1)
     with col3: birth_day = st.number_input("日", 1, 31, 1)
+    
+    # === V5.0 新增：出生时辰 ===
+    birth_hour = st.selectbox(
+        "出生时辰 (排盘必要)",
+        [
+            "未知/不清楚",
+            "子时 (23:00-01:00)", "丑时 (01:00-03:00)", "寅时 (03:00-05:00)",
+            "卯时 (05:00-07:00)", "辰时 (07:00-09:00)", "巳时 (09:00-11:00)",
+            "午时 (11:00-13:00)", "未时 (13:00-15:00)", "申时 (15:00-17:00)",
+            "酉时 (17:00-19:00)", "戌时 (19:00-21:00)", "亥时 (21:00-23:00)"
+        ]
+    )
         
     st.markdown("---")
     st.header("Step 2: 潜意识链接")
@@ -106,7 +121,6 @@ if start_button:
     if not user_question:
         st.error("请先输入你的问题...")
     else:
-        # 1. 翻牌仪式感 (先展示视觉，让后台先连一连)
         st.subheader("🎴 塔罗牌阵 (能量显化)")
         t1, t2, t3 = st.columns(3)
         card_back = load_image("assets/tarot/card_back.jpg")
@@ -118,7 +132,6 @@ if start_button:
         ]
         random_cards = random.sample(cards, 3)
 
-        # 简单的翻牌动画
         if card_back:
             with t1: p1 = st.empty(); p1.image(card_back, use_container_width=True)
             with t2: p2 = st.empty(); p2.image(card_back, use_container_width=True)
@@ -136,16 +149,15 @@ if start_button:
 
         st.divider()
 
-        # 2. 宗师解读 (使用 write_stream 实现真·打字机)
         st.subheader("🧙‍♂️ 宗师深度解读")
         st.markdown("---")
         
-        # 准备用户信息
-        birth_info = f"{birth_year}年{birth_month}月{birth_day}日"
+        # === V5.0: 整合所有新信息 ===
+        # 将性别和时辰也打包发给 AI
+        full_birth_info = f"性别{gender}，出生于{birth_year}年{birth_month}月{birth_day}日，时辰为{birth_hour}"
         user_name_str = name if name else "探求者"
         
-        # 这里直接调用流式函数，Streamlit 会自动把 yield 出来的内容像打字一样显示
         with st.spinner("正在接收宇宙信号..."):
-            st.write_stream(call_coze_stream(user_question, user_name_str, birth_info))
+            st.write_stream(call_coze_stream(user_question, user_name_str, full_birth_info))
         
         st.markdown("---")
